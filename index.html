@@ -350,10 +350,12 @@ function AuthScreen({onAuth}) {
             {loading?<span className="spin">↻</span>:mode==="login"?"Sign In":mode==="register"?"Create Account":"Send Reset Email"}
           </button>
           <div style={{display:"flex",flexDirection:"column",gap:8,alignItems:"center"}}>
-            {mode==="login"&&<>
-              <span style={{fontSize:12,color:"#475569"}}>Don't have an account? <span style={{color:"#60a5fa",cursor:"pointer"}} onClick={()=>{setMode("register");setError(null);setMessage(null);}}>Register</span></span>
-              <span style={{fontSize:12,color:"#475569",cursor:"pointer"}} onClick={()=>{setMode("forgot");setError(null);setMessage(null);}}>Forgot password?</span>
-            </>}
+            {mode==="login"&&(
+              <React.Fragment>
+                <span style={{fontSize:12,color:"#475569"}}>Don't have an account? <span style={{color:"#60a5fa",cursor:"pointer"}} onClick={()=>{setMode("register");setError(null);setMessage(null);}}>Register</span></span>
+                <span style={{fontSize:12,color:"#475569",cursor:"pointer"}} onClick={()=>{setMode("forgot");setError(null);setMessage(null);}}>Forgot password?</span>
+              </React.Fragment>
+            )}
             {mode==="register"&&<span style={{fontSize:12,color:"#475569"}}>Already have an account? <span style={{color:"#60a5fa",cursor:"pointer"}} onClick={()=>{setMode("login");setError(null);setMessage(null);}}>Sign in</span></span>}
             {mode==="forgot"&&<span style={{fontSize:12,color:"#60a5fa",cursor:"pointer"}} onClick={()=>{setMode("login");setError(null);setMessage(null);}}>← Back to sign in</span>}
           </div>
@@ -554,18 +556,20 @@ function Tracker({user,onSignOut}) {
                         <label style={{fontSize:11,color:"#64748b",display:"block",marginBottom:5,textTransform:"uppercase",letterSpacing:"0.06em"}}>Date</label>
                         <input type="date" value={form.date} onChange={e=>setF("date",e.target.value)} style={inp} />
                       </div>
-                      {!form.isAccumulator&&<>
+                      {!form.isAccumulator&&(
                         <div>
                           <label style={{fontSize:11,color:"#64748b",display:"block",marginBottom:5,textTransform:"uppercase",letterSpacing:"0.06em"}}>Bet Type</label>
                           <select value={form.betType} onChange={e=>setF("betType",e.target.value)} style={inp}>
                             {BET_TYPES.map(t=><option key={t}>{t}</option>)}
                           </select>
                         </div>
+                      )}
+                      {!form.isAccumulator&&(
                         <div>
                           <label style={{fontSize:11,color:"#64748b",display:"block",marginBottom:5,textTransform:"uppercase",letterSpacing:"0.06em"}}>Odds (Decimal) *</label>
                           <input type="number" step="0.01" value={form.odds} placeholder="2.50" onChange={e=>setF("odds",e.target.value)} style={inp} />
                         </div>
-                      </>}
+                      )}
                       <div>
                         <label style={{fontSize:11,color:"#64748b",display:"block",marginBottom:5,textTransform:"uppercase",letterSpacing:"0.06em"}}>{form.freeBet?"Free Bet Stake (£) *":"Stake (£) *"}</label>
                         <input type="number" step="0.01" value={form.stake} placeholder="10.00" onChange={e=>setF("stake",e.target.value)} style={{...inp,borderColor:form.freeBet?"#0891b2":"#1e293b"}} />
@@ -672,7 +676,7 @@ function Tracker({user,onSignOut}) {
                               {bet.isAccumulator&&<span style={{fontSize:10,background:"#1e1030",color:"#a78bfa",borderRadius:4,padding:"2px 6px",fontWeight:600}}>ACCA {bet.legs?.length||""}✕</span>}
                               {bet.freeBet&&<span style={{fontSize:10,background:"#041820",color:"#22d3ee",borderRadius:4,padding:"2px 6px",fontWeight:600}}>FREE BET</span>}
                               <span style={{fontSize:14,fontWeight:600,color:"#f1f5f9"}}>{bet.match}</span>
-                              {bet.selection&&<><span style={{fontSize:11,color:"#475569"}}>·</span><span style={{fontSize:12,color:"#94a3b8"}}>{bet.selection}</span></>}
+                              {bet.selection&&<React.Fragment><span style={{fontSize:11,color:"#475569"}}>·</span><span style={{fontSize:12,color:"#94a3b8"}}>{bet.selection}</span></React.Fragment>}
                             </div>
                             {bet.isAccumulator&&bet.legs?.length>0&&(
                               <div style={{marginBottom:6,display:"flex",flexDirection:"column",gap:3}}>
