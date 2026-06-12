@@ -1,0 +1,529 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>World Cup Bet Tracker 2026</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: #0b0e14; color: #e2e8f0; font-family: 'Inter', system-ui, sans-serif; }
+  input, select { color-scheme: dark; }
+  input:focus, select:focus { outline: 2px solid #2563eb !important; }
+  ::-webkit-scrollbar { width: 6px; } ::-webkit-scrollbar-track { background: #0b0e14; } ::-webkit-scrollbar-thumb { background: #1e293b; border-radius: 3px; }
+  .toggle-btn { display:flex; align-items:center; gap:8px; cursor:pointer; user-select:none; }
+  .toggle-track { width:36px; height:20px; border-radius:10px; transition:background 0.2s; position:relative; flex-shrink:0; }
+  .toggle-thumb { width:14px; height:14px; border-radius:50%; background:#fff; position:absolute; top:3px; transition:left 0.2s; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .spin { animation: spin 0.8s linear infinite; display:inline-block; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+const { useState, useMemo, useEffect, useCallback } = React;
+
+const SUPABASE_URL = "https://zwmeinfamljbgsrebrnn.supabase.co";
+const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inp3bWVpbmZhbWxqYmdzcmVicm5uIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODExOTE5ODYsImV4cCI6MjA5Njc2Nzk4Nn0.yEdZZHrP47TPuPUNlkVNYDdq0g1a7ujmKIk_3azxchU";
+const HEADERS = { "Content-Type": "application/json", "apikey": SUPABASE_KEY, "Authorization": `Bearer ${SUPABASE_KEY}`, "Prefer": "return=representation" };
+
+// --- Supabase helpers ---
+const sbFetch = async (path, options={}) => {
+  const res = await fetch(`${SUPABASE_URL}/rest/v1${path}`, { headers: HEADERS, ...options });
+  if (!res.ok) { const err = await res.text(); throw new Error(err); }
+  const text = await res.text();
+  return text ? JSON.parse(text) : [];
+};
+
+// Map camelCase app state <-> snake_case DB columns
+const toDb = (bet) => ({
+  id: bet.id,
+  match: bet.match,
+  selection: bet.selection,
+  bet_type: bet.betType,
+  odds: bet.odds,
+  stake: bet.stake,
+  status: bet.status,
+  returns: bet.returns,
+  notes: bet.notes,
+  date: bet.date,
+  free_bet: bet.freeBet,
+  is_accumulator: bet.isAccumulator,
+  legs: bet.legs || [],
+  potential_return: bet.potentialReturn,
+});
+
+const fromDb = (row) => ({
+  id: row.id,
+  match: row.match,
+  selection: row.selection,
+  betType: row.bet_type,
+  odds: row.odds,
+  stake: row.stake,
+  status: row.status,
+  returns: row.returns,
+  notes: row.notes,
+  date: row.date,
+  freeBet: row.free_bet,
+  isAccumulator: row.is_accumulator,
+  legs: row.legs || [],
+  potentialReturn: row.potential_return,
+});
+
+// --- Constants ---
+const BET_TYPES = ["Match Result","Both Teams to Score","Correct Score","First Goalscorer","Over/Under","Asian Handicap","Outright","Other"];
+const STATUSES = ["Pending","Won","Lost","Void","Cash Out"];
+const STATUS_STYLES = {
+  Pending:    { bg:"#1e3a5f", color:"#7eb8f7", dot:"#7eb8f7" },
+  Won:        { bg:"#0d3320", color:"#4ade80", dot:"#4ade80" },
+  Lost:       { bg:"#3a0f0f", color:"#f87171", dot:"#f87171" },
+  Void:       { bg:"#2a2a2a", color:"#a1a1aa", dot:"#a1a1aa" },
+  "Cash Out": { bg:"#2d2010", color:"#fbbf24", dot:"#fbbf24" },
+};
+
+const fmt = (v) => `£${parseFloat(v||0).toFixed(2)}`;
+
+function calcPnl(bet) {
+  const stake = parseFloat(bet.stake||0);
+  const returns = parseFloat(bet.returns||0);
+  if (bet.status === "Won" || bet.status === "Cash Out") return returns - stake;
+  if (bet.status === "Lost") return bet.freeBet ? 0 : -stake;
+  return null;
+}
+
+function calcStats(bets) {
+  const settled = bets.filter(b => ["Won","Lost","Cash Out"].includes(b.status));
+  const won = bets.filter(b => b.status === "Won");
+  const totalCashStaked = bets.filter(b => !b.freeBet).reduce((s,b) => s + parseFloat(b.stake||0), 0);
+  const totalFreeBetStaked = bets.filter(b => b.freeBet).reduce((s,b) => s + parseFloat(b.stake||0), 0);
+  const pnl = bets.reduce((s,b) => { const p = calcPnl(b); return s + (p !== null ? p : 0); }, 0);
+  const winRate = settled.length ? ((won.length / settled.length)*100).toFixed(0) : 0;
+  return { total: bets.length, totalCashStaked, totalFreeBetStaked, pnl, winRate, won: won.length, settled: settled.length };
+}
+
+const defaultForm = {
+  match:"", betType:"Match Result", selection:"", odds:"", stake:"", status:"Pending",
+  returns:"", notes:"", date: new Date().toISOString().slice(0,10),
+  freeBet: false, isAccumulator: false, legs:[]
+};
+const defaultLeg = { match:"", selection:"", odds:"" };
+
+function Toggle({ value, onChange, label, color="#2563eb" }) {
+  return (
+    <div className="toggle-btn" onClick={() => onChange(!value)}>
+      <div className="toggle-track" style={{ background: value ? color : "#1e293b" }}>
+        <div className="toggle-thumb" style={{ left: value ? "19px" : "3px" }} />
+      </div>
+      <span style={{ fontSize:12, color: value ? "#f1f5f9" : "#64748b", fontWeight:500 }}>{label}</span>
+    </div>
+  );
+}
+
+function App() {
+  const [bets, setBets] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState(null);
+  const [showForm, setShowForm] = useState(false);
+  const [form, setForm] = useState(defaultForm);
+  const [editId, setEditId] = useState(null);
+  const [filterStatus, setFilterStatus] = useState("All");
+  const [sortBy, setSortBy] = useState("date");
+
+  // Load bets from Supabase on mount
+  useEffect(() => {
+    (async () => {
+      try {
+        const rows = await sbFetch("/bets?order=created_at.desc");
+        setBets(rows.map(fromDb));
+      } catch(e) {
+        setError("Could not connect to database: " + e.message);
+      } finally {
+        setLoading(false);
+      }
+    })();
+  }, []);
+
+  const stats = useMemo(() => calcStats(bets), [bets]);
+
+  const filtered = useMemo(() => {
+    let list = filterStatus === "All" ? bets : bets.filter(b => b.status === filterStatus);
+    return [...list].sort((a,b) => {
+      if (sortBy === "date") return new Date(b.date) - new Date(a.date);
+      if (sortBy === "stake") return parseFloat(b.stake) - parseFloat(a.stake);
+      if (sortBy === "odds") return parseFloat(b.odds) - parseFloat(a.odds);
+      return 0;
+    });
+  }, [bets, filterStatus, sortBy]);
+
+  const setF = (key, val) => setForm(p => ({ ...p, [key]: val }));
+
+  const accaOdds = useMemo(() => {
+    if (!form.isAccumulator || !form.legs.length) return null;
+    if (!form.legs.every(l => l.odds && !isNaN(parseFloat(l.odds)))) return null;
+    return form.legs.reduce((acc, leg) => acc * parseFloat(leg.odds), 1).toFixed(2);
+  }, [form.legs, form.isAccumulator]);
+
+  const effectiveOdds = form.isAccumulator ? (accaOdds || form.odds) : form.odds;
+  const potReturn = parseFloat(form.stake||0) * parseFloat(effectiveOdds||0);
+
+  const updateLeg = (i, key, val) => {
+    const legs = [...form.legs];
+    legs[i] = { ...legs[i], [key]: val };
+    setForm(p => ({ ...p, legs }));
+  };
+  const addLeg = () => setForm(p => ({ ...p, legs: [...p.legs, { ...defaultLeg }] }));
+  const removeLeg = (i) => setForm(p => ({ ...p, legs: p.legs.filter((_,idx) => idx !== i) }));
+
+  const handleSubmit = async () => {
+    if (!form.match || !form.stake) return;
+    if (!form.isAccumulator && !form.odds) return;
+    const finalOdds = form.isAccumulator ? (accaOdds || form.odds) : form.odds;
+    const bet = {
+      ...form,
+      odds: finalOdds,
+      id: editId || Date.now(),
+      potentialReturn: (parseFloat(form.stake||0)*parseFloat(finalOdds||0)).toFixed(2),
+    };
+    setSaving(true);
+    setError(null);
+    try {
+      if (editId) {
+        await sbFetch(`/bets?id=eq.${editId}`, { method:"PATCH", body: JSON.stringify(toDb(bet)) });
+        setBets(prev => prev.map(b => b.id === editId ? bet : b));
+      } else {
+        const rows = await sbFetch("/bets", { method:"POST", body: JSON.stringify(toDb(bet)) });
+        setBets(prev => [fromDb(rows[0]), ...prev]);
+      }
+      setForm(defaultForm); setShowForm(false); setEditId(null);
+    } catch(e) {
+      setError("Save failed: " + e.message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleEdit = (bet) => { setForm({...bet}); setEditId(bet.id); setShowForm(true); };
+
+  const handleDelete = async (id) => {
+    setSaving(true);
+    try {
+      await sbFetch(`/bets?id=eq.${id}`, { method:"DELETE" });
+      setBets(prev => prev.filter(b => b.id !== id));
+    } catch(e) {
+      setError("Delete failed: " + e.message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const updateStatus = async (id, status, extra={}) => {
+    const bet = bets.find(b => b.id === id);
+    if (!bet) return;
+    const updated = { ...bet, status, ...extra };
+    setSaving(true);
+    try {
+      await sbFetch(`/bets?id=eq.${id}`, { method:"PATCH", body: JSON.stringify(toDb(updated)) });
+      setBets(prev => prev.map(b => b.id === id ? updated : b));
+    } catch(e) {
+      setError("Update failed: " + e.message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const inp = { background:"#0b0e14", border:"1px solid #1e293b", borderRadius:7, padding:"8px 11px", color:"#f1f5f9", fontSize:13, width:"100%" };
+  const smInp = { background:"#0b0e14", border:"1px solid #1e293b", borderRadius:6, padding:"6px 9px", color:"#f1f5f9", fontSize:12, width:"100%" };
+
+  return (
+    <div style={{ minHeight:"100vh" }}>
+      {/* Header */}
+      <div style={{ background:"linear-gradient(135deg,#0d1b2e 0%,#0b0e14 100%)", borderBottom:"1px solid #1e293b", padding:"20px 28px", display:"flex", alignItems:"center", justifyContent:"space-between" }}>
+        <div style={{ display:"flex", alignItems:"center", gap:12 }}>
+          <span style={{ fontSize:28 }}>🏆</span>
+          <div>
+            <div style={{ fontSize:18, fontWeight:700, letterSpacing:"-0.02em", color:"#f1f5f9" }}>World Cup Bet Tracker</div>
+            <div style={{ fontSize:12, color:"#64748b", marginTop:1 }}>2026 · USA · Canada · Mexico</div>
+          </div>
+        </div>
+        <div style={{ display:"flex", alignItems:"center", gap:12 }}>
+          {saving && <span style={{ fontSize:11, color:"#475569", display:"flex", alignItems:"center", gap:5 }}><span className="spin">↻</span> Saving...</span>}
+          {!saving && !loading && <span style={{ fontSize:11, color:"#1e4d2b" }}>● Synced</span>}
+          <button onClick={() => { setShowForm(!showForm); setEditId(null); setForm(defaultForm); }}
+            style={{ background:showForm?"#1e293b":"#2563eb", color:"#fff", border:"none", borderRadius:8, padding:"9px 18px", fontSize:13, fontWeight:600, cursor:"pointer" }}>
+            {showForm ? "✕ Cancel" : "+ Add Bet"}
+          </button>
+        </div>
+      </div>
+
+      {/* Error banner */}
+      {error && (
+        <div style={{ background:"#3a0f0f", borderBottom:"1px solid #7f1d1d", padding:"10px 28px", fontSize:12, color:"#fca5a5", display:"flex", justifyContent:"space-between" }}>
+          <span>⚠ {error}</span>
+          <span style={{ cursor:"pointer", color:"#f87171" }} onClick={() => setError(null)}>✕</span>
+        </div>
+      )}
+
+      {/* Stats */}
+      <div style={{ display:"grid", gridTemplateColumns:"repeat(5,1fr)", gap:1, background:"#1e293b", borderBottom:"1px solid #1e293b" }}>
+        {[
+          { label:"Total Bets", value: stats.total },
+          { label:"Cash Staked", value: fmt(stats.totalCashStaked) },
+          { label:"Free Bets", value: fmt(stats.totalFreeBetStaked), sub:`${bets.filter(b=>b.freeBet).length} bets` },
+          { label:"P&L", value:(stats.pnl>=0?"+":"")+fmt(stats.pnl), color:stats.pnl>=0?"#4ade80":"#f87171" },
+          { label:"Win Rate", value:`${stats.winRate}%`, sub:`${stats.won}/${stats.settled} settled` },
+        ].map((s,i) => (
+          <div key={i} style={{ background:"#0b0e14", padding:"14px 20px" }}>
+            <div style={{ fontSize:11, color:"#64748b", textTransform:"uppercase", letterSpacing:"0.08em", marginBottom:4 }}>{s.label}</div>
+            <div style={{ fontSize:20, fontWeight:700, color:s.color||"#f1f5f9", fontVariantNumeric:"tabular-nums" }}>{s.value}</div>
+            {s.sub && <div style={{ fontSize:11, color:"#475569", marginTop:2 }}>{s.sub}</div>}
+          </div>
+        ))}
+      </div>
+
+      <div style={{ padding:"20px 28px" }}>
+        {/* Loading state */}
+        {loading && (
+          <div style={{ textAlign:"center", padding:"60px 0", color:"#334155" }}>
+            <div style={{ fontSize:24, marginBottom:12 }} className="spin">↻</div>
+            <div style={{ fontSize:13 }}>Loading bets...</div>
+          </div>
+        )}
+
+        {!loading && (
+          <>
+            {/* Form */}
+            {showForm && (
+              <div style={{ background:"#111827", border:"1px solid #1e293b", borderRadius:12, padding:22, marginBottom:22 }}>
+                <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:16 }}>
+                  <div style={{ fontSize:14, fontWeight:600, color:"#94a3b8" }}>{editId ? "Edit Bet" : "New Bet"}</div>
+                  <div style={{ display:"flex", gap:20 }}>
+                    <Toggle value={form.isAccumulator} onChange={v => setForm(p=>({...p, isAccumulator:v, legs: v && p.legs.length===0 ? [{...defaultLeg},{...defaultLeg}] : p.legs}))} label="Accumulator" color="#7c3aed" />
+                    <Toggle value={form.freeBet} onChange={v => setF("freeBet", v)} label="Free Bet" color="#0891b2" />
+                  </div>
+                </div>
+
+                <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:12 }}>
+                  <div>
+                    <label style={{ fontSize:11, color:"#64748b", display:"block", marginBottom:5, textTransform:"uppercase", letterSpacing:"0.06em" }}>
+                      {form.isAccumulator ? "Acca Name / Ref *" : "Match *"}
+                    </label>
+                    <input type="text" value={form.match} placeholder={form.isAccumulator ? "e.g. WC Group Stage 4-fold" : "e.g. England vs France"}
+                      onChange={e => setF("match", e.target.value)} style={inp} />
+                  </div>
+                  {!form.isAccumulator && (
+                    <div>
+                      <label style={{ fontSize:11, color:"#64748b", display:"block", marginBottom:5, textTransform:"uppercase", letterSpacing:"0.06em" }}>Selection *</label>
+                      <input type="text" value={form.selection} placeholder="e.g. England to Win"
+                        onChange={e => setF("selection", e.target.value)} style={inp} />
+                    </div>
+                  )}
+                  <div>
+                    <label style={{ fontSize:11, color:"#64748b", display:"block", marginBottom:5, textTransform:"uppercase", letterSpacing:"0.06em" }}>Date</label>
+                    <input type="date" value={form.date} onChange={e => setF("date", e.target.value)} style={inp} />
+                  </div>
+                  {!form.isAccumulator && (
+                    <div>
+                      <label style={{ fontSize:11, color:"#64748b", display:"block", marginBottom:5, textTransform:"uppercase", letterSpacing:"0.06em" }}>Bet Type</label>
+                      <select value={form.betType} onChange={e => setF("betType", e.target.value)} style={inp}>
+                        {BET_TYPES.map(t => <option key={t}>{t}</option>)}
+                      </select>
+                    </div>
+                  )}
+                  {!form.isAccumulator && (
+                    <div>
+                      <label style={{ fontSize:11, color:"#64748b", display:"block", marginBottom:5, textTransform:"uppercase", letterSpacing:"0.06em" }}>Odds (Decimal) *</label>
+                      <input type="number" step="0.01" value={form.odds} placeholder="2.50"
+                        onChange={e => setF("odds", e.target.value)} style={inp} />
+                    </div>
+                  )}
+                  <div>
+                    <label style={{ fontSize:11, color:"#64748b", display:"block", marginBottom:5, textTransform:"uppercase", letterSpacing:"0.06em" }}>
+                      {form.freeBet ? "Free Bet Stake (£) *" : "Stake (£) *"}
+                    </label>
+                    <input type="number" step="0.01" value={form.stake} placeholder="10.00"
+                      onChange={e => setF("stake", e.target.value)}
+                      style={{ ...inp, borderColor: form.freeBet ? "#0891b2" : "#1e293b" }} />
+                  </div>
+                  <div>
+                    <label style={{ fontSize:11, color:"#64748b", display:"block", marginBottom:5, textTransform:"uppercase", letterSpacing:"0.06em" }}>Status</label>
+                    <select value={form.status} onChange={e => setF("status", e.target.value)} style={inp}>
+                      {STATUSES.map(s => <option key={s}>{s}</option>)}
+                    </select>
+                  </div>
+                  {(form.status==="Won"||form.status==="Cash Out") && (
+                    <div>
+                      <label style={{ fontSize:11, color:"#64748b", display:"block", marginBottom:5, textTransform:"uppercase", letterSpacing:"0.06em" }}>Actual Returns (£)</label>
+                      <input type="number" step="0.01" value={form.returns}
+                        placeholder={potReturn.toFixed(2)}
+                        onChange={e => setF("returns", e.target.value)} style={inp} />
+                    </div>
+                  )}
+                  <div style={{ gridColumn:"1 / -1" }}>
+                    <label style={{ fontSize:11, color:"#64748b", display:"block", marginBottom:5, textTransform:"uppercase", letterSpacing:"0.06em" }}>Notes</label>
+                    <input type="text" value={form.notes} placeholder="Optional notes..."
+                      onChange={e => setF("notes", e.target.value)} style={inp} />
+                  </div>
+                </div>
+
+                {/* Acca legs */}
+                {form.isAccumulator && (
+                  <div style={{ marginTop:16 }}>
+                    <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:10 }}>
+                      <div style={{ fontSize:12, color:"#7c3aed", fontWeight:600, textTransform:"uppercase", letterSpacing:"0.06em" }}>
+                        Legs ({form.legs.length}){accaOdds && <span style={{ color:"#94a3b8", fontWeight:400 }}> · Combined odds: <strong style={{ color:"#f1f5f9" }}>{accaOdds}</strong></span>}
+                      </div>
+                      <button onClick={addLeg} style={{ background:"#1e1030", color:"#7c3aed", border:"1px solid #3b0f8f", borderRadius:6, padding:"4px 12px", fontSize:11, cursor:"pointer", fontWeight:600 }}>+ Add Leg</button>
+                    </div>
+                    <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
+                      {form.legs.map((leg,i) => (
+                        <div key={i} style={{ display:"grid", gridTemplateColumns:"2fr 2fr 1fr auto", gap:8, alignItems:"end", background:"#0b0e14", borderRadius:8, padding:"10px 12px", border:"1px solid #1e293b" }}>
+                          <div>
+                            {i===0 && <label style={{ fontSize:10, color:"#475569", display:"block", marginBottom:4, textTransform:"uppercase", letterSpacing:"0.06em" }}>Match</label>}
+                            <input type="text" value={leg.match} placeholder="e.g. Brazil vs Argentina"
+                              onChange={e => updateLeg(i,"match",e.target.value)} style={smInp} />
+                          </div>
+                          <div>
+                            {i===0 && <label style={{ fontSize:10, color:"#475569", display:"block", marginBottom:4, textTransform:"uppercase", letterSpacing:"0.06em" }}>Selection</label>}
+                            <input type="text" value={leg.selection} placeholder="e.g. Brazil to Win"
+                              onChange={e => updateLeg(i,"selection",e.target.value)} style={smInp} />
+                          </div>
+                          <div>
+                            {i===0 && <label style={{ fontSize:10, color:"#475569", display:"block", marginBottom:4, textTransform:"uppercase", letterSpacing:"0.06em" }}>Odds</label>}
+                            <input type="number" step="0.01" value={leg.odds} placeholder="1.80"
+                              onChange={e => updateLeg(i,"odds",e.target.value)} style={smInp} />
+                          </div>
+                          <button onClick={() => removeLeg(i)}
+                            style={{ background:"transparent", color:"#475569", border:"none", fontSize:16, cursor:"pointer", padding:"0 4px", lineHeight:1, alignSelf:"flex-end", marginBottom:2 }}>×</button>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Preview bar */}
+                {form.stake && (form.isAccumulator ? accaOdds : form.odds) && (
+                  <div style={{ marginTop:12, padding:"10px 14px", background: form.freeBet ? "#041820" : "#0b1120", borderRadius:7, border:`1px solid ${form.freeBet ? "#0891b2" : "#1e3a5f"}`, fontSize:12 }}>
+                    {form.freeBet ? (
+                      <span style={{ color:"#22d3ee" }}>🎟️ Free bet · Potential return: <strong>{fmt(potReturn)}</strong> · P&L if won: <strong>+{fmt(potReturn - parseFloat(form.stake||0))}</strong> · P&L if lost: <strong style={{ color:"#a1a1aa" }}>£0.00</strong></span>
+                    ) : (
+                      <span style={{ color:"#7eb8f7" }}>Potential return: <strong>{fmt(potReturn)}</strong> · Profit: <strong>+{fmt(potReturn - parseFloat(form.stake||0))}</strong> · Implied prob: <strong>{((1/parseFloat(effectiveOdds))*100).toFixed(1)}%</strong></span>
+                    )}
+                  </div>
+                )}
+
+                <div style={{ marginTop:14, display:"flex", gap:10, alignItems:"center" }}>
+                  <button onClick={handleSubmit} disabled={saving}
+                    style={{ background: saving ? "#1e3a5f" : "#2563eb", color:"#fff", border:"none", borderRadius:7, padding:"9px 22px", fontSize:13, fontWeight:600, cursor: saving ? "default" : "pointer", opacity: saving ? 0.7 : 1 }}>
+                    {saving ? "Saving..." : editId ? "Save Changes" : "Add Bet"}
+                  </button>
+                  <button onClick={() => { setShowForm(false); setEditId(null); setForm(defaultForm); }}
+                    style={{ background:"transparent", color:"#64748b", border:"1px solid #1e293b", borderRadius:7, padding:"9px 18px", fontSize:13, cursor:"pointer" }}>
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Filters */}
+            <div style={{ display:"flex", gap:10, marginBottom:16, alignItems:"center", justifyContent:"space-between", flexWrap:"wrap" }}>
+              <div style={{ display:"flex", gap:6, flexWrap:"wrap" }}>
+                {["All",...STATUSES].map(s => (
+                  <button key={s} onClick={() => setFilterStatus(s)}
+                    style={{ padding:"5px 13px", borderRadius:20, border:"none", fontSize:12, fontWeight:500, cursor:"pointer",
+                      background:filterStatus===s?"#2563eb":"#111827", color:filterStatus===s?"#fff":"#64748b" }}>
+                    {s} ({s==="All" ? bets.length : bets.filter(b=>b.status===s).length})
+                  </button>
+                ))}
+              </div>
+              <select value={sortBy} onChange={e => setSortBy(e.target.value)}
+                style={{ background:"#111827", border:"1px solid #1e293b", borderRadius:7, padding:"5px 11px", color:"#94a3b8", fontSize:12, cursor:"pointer" }}>
+                <option value="date">Sort: Date</option>
+                <option value="stake">Sort: Stake</option>
+                <option value="odds">Sort: Odds</option>
+              </select>
+            </div>
+
+            {/* Bets list */}
+            {filtered.length === 0 ? (
+              <div style={{ textAlign:"center", padding:"60px 0", color:"#334155" }}>
+                <div style={{ fontSize:40, marginBottom:12 }}>⚽</div>
+                <div style={{ fontSize:15, fontWeight:500 }}>No bets yet</div>
+                <div style={{ fontSize:13, marginTop:6 }}>Add your first bet to start tracking</div>
+              </div>
+            ) : (
+              <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
+                {filtered.map(bet => {
+                  const st = STATUS_STYLES[bet.status] || STATUS_STYLES.Pending;
+                  const pnl = calcPnl(bet);
+                  return (
+                    <div key={bet.id} style={{ background:"#111827", border:`1px solid ${bet.isAccumulator ? "#2d1a5e" : "#1e293b"}`, borderRadius:10, padding:"14px 18px", display:"grid", gridTemplateColumns:"1fr auto", alignItems:"start", gap:12 }}>
+                      <div>
+                        <div style={{ display:"flex", alignItems:"center", gap:8, flexWrap:"wrap", marginBottom:5 }}>
+                          {bet.isAccumulator && <span style={{ fontSize:10, background:"#1e1030", color:"#a78bfa", borderRadius:4, padding:"2px 6px", fontWeight:600 }}>ACCA {bet.legs?.length || ""}✕</span>}
+                          {bet.freeBet && <span style={{ fontSize:10, background:"#041820", color:"#22d3ee", borderRadius:4, padding:"2px 6px", fontWeight:600 }}>FREE BET</span>}
+                          <span style={{ fontSize:14, fontWeight:600, color:"#f1f5f9" }}>{bet.match}</span>
+                          {bet.selection && <><span style={{ fontSize:11, color:"#475569" }}>·</span><span style={{ fontSize:12, color:"#94a3b8" }}>{bet.selection}</span></>}
+                        </div>
+                        {bet.isAccumulator && bet.legs?.length > 0 && (
+                          <div style={{ marginBottom:6, display:"flex", flexDirection:"column", gap:3 }}>
+                            {bet.legs.map((leg,i) => (
+                              <div key={i} style={{ fontSize:11, color:"#64748b", display:"flex", gap:6 }}>
+                                <span style={{ color:"#475569" }}>{i+1}.</span>
+                                <span>{leg.match}</span>
+                                <span style={{ color:"#334155" }}>—</span>
+                                <span style={{ color:"#94a3b8" }}>{leg.selection}</span>
+                                {leg.odds && <span style={{ color:"#475569" }}>@ {leg.odds}</span>}
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                        <div style={{ display:"flex", alignItems:"center", gap:8, flexWrap:"wrap" }}>
+                          {!bet.isAccumulator && <span style={{ fontSize:11, background:"#1e293b", color:"#64748b", borderRadius:4, padding:"2px 7px" }}>{bet.betType}</span>}
+                          <span style={{ fontSize:12, color:"#94a3b8" }}>@ <strong style={{ color:"#f1f5f9" }}>{parseFloat(bet.odds).toFixed(2)}</strong></span>
+                          <span style={{ fontSize:12, color:"#94a3b8" }}>
+                            {bet.freeBet ? "Free Bet: " : "Stake: "}
+                            <strong style={{ color: bet.freeBet ? "#22d3ee" : "#f1f5f9" }}>{fmt(bet.stake)}</strong>
+                          </span>
+                          {pnl !== null && <span style={{ fontSize:12, fontWeight:600, color:pnl>=0?"#4ade80":"#f87171" }}>{pnl>=0?"+":""}{fmt(pnl)}</span>}
+                          {bet.status==="Pending" && <span style={{ fontSize:11, color:"#475569" }}>Pot: {fmt(bet.potentialReturn)}</span>}
+                          <span style={{ fontSize:11, color:"#334155" }}>{bet.date}</span>
+                        </div>
+                        {bet.notes && <div style={{ fontSize:11, color:"#475569", marginTop:5, fontStyle:"italic" }}>{bet.notes}</div>}
+                      </div>
+                      <div style={{ display:"flex", flexDirection:"column", alignItems:"flex-end", gap:8 }}>
+                        <span style={{ background:st.bg, color:st.color, borderRadius:6, padding:"3px 10px", fontSize:11, fontWeight:600, display:"flex", alignItems:"center", gap:5 }}>
+                          <span style={{ width:5, height:5, borderRadius:"50%", background:st.dot, display:"inline-block" }} />
+                          {bet.status}
+                        </span>
+                        <div style={{ display:"flex", gap:5, flexWrap:"wrap", justifyContent:"flex-end" }}>
+                          {bet.status==="Pending" && STATUSES.filter(s=>s!=="Pending").map(s => (
+                            <button key={s} onClick={() => {
+                              if (s==="Won") updateStatus(bet.id, s, { returns:(parseFloat(bet.stake)*parseFloat(bet.odds)).toFixed(2) });
+                              else updateStatus(bet.id, s);
+                            }} style={{ background:"#1e293b", color:STATUS_STYLES[s]?.color||"#94a3b8", border:"none", borderRadius:5, padding:"3px 8px", fontSize:10, cursor:"pointer", fontWeight:500 }}>
+                              {s}
+                            </button>
+                          ))}
+                          <button onClick={() => handleEdit(bet)} style={{ background:"#1e293b", color:"#64748b", border:"none", borderRadius:5, padding:"3px 8px", fontSize:10, cursor:"pointer" }}>✏️</button>
+                          <button onClick={() => handleDelete(bet.id)} style={{ background:"#1e293b", color:"#64748b", border:"none", borderRadius:5, padding:"3px 8px", fontSize:10, cursor:"pointer" }}>🗑️</button>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+</script>
+</body>
+</html>
