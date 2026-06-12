@@ -123,7 +123,7 @@ function FixturesTab() {
     for (const comp of comps) {
       try {
         const res = await fetch(
-          `https://api.football-data.org/v4/competitions/${comp}/matches?dateFrom=${today}&dateTo=${today}`,
+          `https://corsproxy.io/?url=${encodeURIComponent(`https://api.football-data.org/v4/competitions/${comp}/matches?dateFrom=${today}&dateTo=${today}`)}`,
           { headers:{ "X-Auth-Token": FOOTBALL_API_KEY } }
         );
         if (res.ok) {
