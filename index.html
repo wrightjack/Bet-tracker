@@ -34,7 +34,7 @@ const { useState, useMemo, useEffect, useCallback, useRef } = React;
 const SUPABASE_URL = "https://zwmeinfamljbgsrebrnn.supabase.co";
 const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inp3bWVpbmZhbWxqYmdzcmVicm5uIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODExOTE5ODYsImV4cCI6MjA5Njc2Nzk4Nn0.yEdZZHrP47TPuPUNlkVNYDdq0g1a7ujmKIk_3azxchU";
 const FOOTBALL_API_KEY = "c24c6075bad741b58adb6f035353205b";
-const ODDS_API_KEY = "YOUR_ODDS_API_KEY"; // ← paste The Odds API key here
+const ODDS_API_KEY = "064ddade59c5ed246b25fa7e27aca1c2"; // ← paste The Odds API key here
 const sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 
 const COMPS = [2000, 2021, 2018];
@@ -148,7 +148,7 @@ async function fetchPrediction(home, away, competition) {
 
 // ── Odds fetcher ──────────────────────────────────────────────────────────────
 async function fetchOdds(home, away) {
-  if (ODDS_API_KEY === "YOUR_ODDS_API_KEY") return null;
+  if (ODDS_API_KEY === "064ddade59c5ed246b25fa7e27aca1c2") return null;
   try {
     const query = encodeURIComponent("soccer");
     const url = "https://api.the-odds-api.com/v4/sports/soccer/odds/?apiKey=" + ODDS_API_KEY + "&regions=uk&markets=h2h&bookmakers=bet365,williamhill,betfair,paddypower,skybet,ladbrokes";
@@ -302,19 +302,19 @@ function FixtureModal({ match, comp, onClose }) {
             <span>📊</span> Best Available Odds
           </div>
 
-          {ODDS_API_KEY === "YOUR_ODDS_API_KEY" && (
+          {ODDS_API_KEY === "064ddade59c5ed246b25fa7e27aca1c2" && (
             <div style={{background:"#0b0e14", borderRadius:8, padding:"14px", fontSize:12, color:"#475569"}}>
               Add your Odds API key to enable live bookmaker odds. Get a free key at <strong style={{color:"#94a3b8"}}>the-odds-api.com</strong>.
             </div>
           )}
 
-          {ODDS_API_KEY !== "YOUR_ODDS_API_KEY" && oddsLoading && (
+          {ODDS_API_KEY !== "064ddade59c5ed246b25fa7e27aca1c2" && oddsLoading && (
             <div style={{display:"flex", alignItems:"center", gap:10, color:"#475569", fontSize:13}}>
               <span className="spin">↻</span> Loading odds...
             </div>
           )}
 
-          {ODDS_API_KEY !== "YOUR_ODDS_API_KEY" && !oddsLoading && !bestOdds && (
+          {ODDS_API_KEY !== "064ddade59c5ed246b25fa7e27aca1c2" && !oddsLoading && !bestOdds && (
             <div style={{fontSize:13, color:"#475569"}}>No odds available for this match yet.</div>
           )}
 
